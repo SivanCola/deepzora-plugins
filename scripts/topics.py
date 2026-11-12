@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -22,18 +23,20 @@ def main(inspector, dest):
         repos=api(f"search/repositories?q=topic:deepzora-plugin+archived:false+fork:false&per_page=100&page={page}")["items"]
         for repo in repos:
             name=repo["full_name"]
-            sha=api("repos/"+name+"/commits/"+repo["default_branch"])["sha"]
-            with tempfile.TemporaryDirectory() as tmp:
-                root=Path(tmp); out=root/"out.json"
-                label=repo.get("description") or name
-                entry=dict(id=name.lower(),name=repo["name"],repo=name,commit=sha,summary={"zh":label,"en":label})
-                (root/"registry.json").write_text(json.dumps(dict(schemaVersion=1,plugins=[entry])))
-                try:
+            # Anyone can tag a repository, so nothing about one (an empty
+            # repository, a failed request, an odd manifest) may stop the scan.
+            try:
+                sha=api("repos/"+name+"/commits/"+repo["default_branch"])["sha"]
+                with tempfile.TemporaryDirectory() as tmp:
+                    root=Path(tmp); out=root/"out.json"
+                    label=(repo.get("description") or "").strip() or name
+                    entry=dict(id=name.lower(),name=repo["name"],repo=name,commit=sha,summary={"zh":label,"en":label})
+                    (root/"registry.json").write_text(json.dumps(dict(schemaVersion=1,plugins=[entry])))
                     build(root,out,inspector,None)
-                except (ValueError,KeyError, __import__("subprocess").SubprocessError) as err:
-                    print(f"skipping {name}: {err}",file=sys.stderr)
-                    continue
-                rows.extend(json.loads(out.read_text())["releases"])
+                    rows.extend(json.loads(out.read_text())["releases"])
+            except (ValueError,KeyError,TypeError,OSError,subprocess.SubprocessError) as err:
+                print(f"skipping {name}: {err}",file=sys.stderr)
+
         if len(repos)<100:
             break
     Path(dest).write_text(json.dumps(dict(schemaVersion=1,releases=rows),ensure_ascii=False,indent=2)+"\n")
