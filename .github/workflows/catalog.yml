@@ -1,0 +1,88 @@
+name: Plugin catalog
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: catalog-${{ github.event_name == 'pull_request' && github.event.number || 'dist' }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: SivanCola/deepzora
+          ref: 943bdd50af959b91d957b74695045f737079fe34
+          path: core
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - run: sh trusted/scripts/inspector.sh core "$RUNNER_TEMP/plugin-inspect"
+      - name: Read last published index
+        run: |
+          mkdir out
+          if [ -n "$(git -C candidate branch -r --list origin/dist)" ]; then
+            git -C candidate show origin/dist:index-v1.json > previous.json
+          fi
+      - name: Validate pinned packages and emit review inventory
+        run: python3 trusted/scripts/catalog.py candidate out/index-v1.json --previous previous.json --inspector "$RUNNER_TEMP/plugin-inspect"
+      - name: Scan GitHub topic separately
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 trusted/scripts/topics.py "$RUNNER_TEMP/plugin-inspect" out/tagged.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog
+          path: out/*.json
+  publish:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: catalog
+          path: ${{ runner.temp }}/catalog
+      - name: Publish complete snapshot
+        run: |
+          set -eu
+          if git show-ref --verify --quiet refs/remotes/origin/dist; then
+            git checkout -B dist origin/dist
+          else
+            git checkout --orphan dist
+            git rm -rf .
+            printf '{"schemaVersion":1,"releases":[]}\n' > tagged.json
+          fi
+          cp "$RUNNER_TEMP"/catalog/*.json .
+          git add index-v1.json tagged.json
+          if ! git diff --cached --quiet; then
+            git -c user.name=deepzora-catalog -c user.email=catalog@users.noreply.github.com commit -m "Publish catalog from ${GITHUB_SHA}"
+            git push origin HEAD:dist
+          fi
+
