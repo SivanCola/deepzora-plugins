@@ -1,0 +1,7 @@
+{
+  "apiVersion": "deepzora.com/plugin/v2",
+  "name": "review-checklist",
+  "version": "1.0.0",
+  "description": "A concise checklist for reviewing a proposed change.",
+  "contributes": {"skills":["skills"]}
+}

@@ -1,1 +1,9 @@
-{"schemaVersion":1,"plugins":[]}
+{
+  "schemaVersion": 1,
+  "plugins": [{
+    "id": "community/review-checklist",
+    "name": "Review Checklist",
+    "path": "packages/review-checklist",
+    "summary": {"en":"Review a change for behavior, risk and test coverage.","zh":"审阅改动的行为、风险与测试覆盖。"}
+  }]
+}
