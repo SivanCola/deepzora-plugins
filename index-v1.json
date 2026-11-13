@@ -1,4 +1,24 @@
 {
   "schemaVersion": 1,
-  "releases": []
+  "releases": [
+    {
+      "id": "community/review-checklist",
+      "repo": "SivanCola/deepzora-plugins",
+      "path": "packages/review-checklist",
+      "commit": "762d58f80167bdc0059eacb230afb88c32e42df3",
+      "name": "Review Checklist",
+      "summary": {
+        "en": "Review a change for behavior, risk and test coverage.",
+        "zh": "审阅改动的行为、风险与测试覆盖。"
+      },
+      "capabilities": [
+        "Skills"
+      ],
+      "platforms": [],
+      "version": "1.0.0",
+      "manifestName": "review-checklist",
+      "manifestKind": "deepzora",
+      "yanked": false
+    }
+  ]
 }
