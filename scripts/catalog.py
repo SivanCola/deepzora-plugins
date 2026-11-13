@@ -8,7 +8,12 @@ import subprocess
 import tempfile
 
 PAIR = r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*"
-VERSION = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[a-zA-Z0-9.-]+)?"
+# Exactly what the client accepts (canonical SemVer 2.0, no build metadata): a
+# row the client rejects would be dropped there after passing here.
+IDENT = r"(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
+VERSION = rf"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-{IDENT}(?:\.{IDENT})*)?"
+SEGMENT = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+KINDS = ("deepzora", "codex", "claude")
 SELF = "SivanCola/deepzora-plugins"
 
 
@@ -36,7 +41,14 @@ def build(root, output, inspector, previous):
             raise ValueError("missing display metadata")
         if key in ids or (repo.lower(),sub) in origins:
             raise ValueError("duplicate listing")
-        origins[(repo.lower(),sub)], _ = key, ids.add(key)
+        ids.add(key)
+        origins[(repo.lower(), sub)] = key
+        minimum = item.get("minDeepzora")
+        if minimum is not None and not re.fullmatch(VERSION, minimum):
+            raise ValueError("invalid minimum Deepzora version")
+        platforms = item.get("platforms", [])
+        if not isinstance(platforms, list) or any(p not in ("darwin","linux","windows") for p in platforms):
+            raise ValueError("invalid platforms")
         with tempfile.TemporaryDirectory() as tmp:
             if "commit" in item:
                 sha = item["commit"]
@@ -61,14 +73,25 @@ def build(root, output, inspector, previous):
                     raise ValueError("catalog packages cannot contain symlinks")
             report = json.loads(subprocess.check_output([inspector, str(package)], timeout=30))
             version = report["version"]
-            if not re.fullmatch(VERSION, version):
+            if not isinstance(version, str) or not re.fullmatch(VERSION, version):
                 raise ValueError("manifest must declare a semantic version")
+            if not re.fullmatch(SEGMENT, str(report["manifestName"])) or report["manifestKind"] not in KINDS:
+                raise ValueError("unsupported manifest name or kind")
             caps = [k for k,v in report["counts"].items() if v]
             if not caps and report["manifestKind"] != "deepzora":
                 raise ValueError("no compatible capabilities")
             row = dict(id=key, repo=repo, path=sub, commit=sha, name=item["name"],
                        summary=item["summary"], capabilities=caps, platforms=item.get("platforms", []),
                        **{k: report[k] for k in ("version","manifestName","manifestKind")})
+            if minimum:
+                row["minDeepzora"] = minimum
+            old_versions = [r for (rid, _), r in releases.items() if rid == key]
+            for prior in old_versions:
+                if prior["commit"] != sha:
+                    print(json.dumps({"compare":f"https://github.com/{repo}/compare/{prior['commit']}...{sha}",
+                                      "previousVersion":prior["version"],"candidateVersion":version,
+                                      "addedCapabilities": sorted(set(caps)-set(prior["capabilities"])),
+                                      "removedCapabilities": sorted(set(prior["capabilities"])-set(caps))}))
             old = releases.get((key,version))
             if old and (old["commit"],old["repo"],old["path"]) != (sha,repo,sub):
                 raise ValueError(f"{key}@{version}: released source is immutable; bump version")
